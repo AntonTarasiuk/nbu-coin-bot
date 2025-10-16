@@ -2,11 +2,25 @@ import { Telegraf } from 'telegraf';
 import { config } from 'dotenv';
 import { getNewCoins, getCoinDetails } from './scraper.js';
 import fs from 'fs';
+import express from 'express'; // ✅ додай цей імпорт
 
 config();
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const CHAT_ID = process.env.CHAT_ID;
+
+// ==== Express сервер для Render / UptimeRobot ====
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send('✅ Bot is running!');
+});
+
+// Render автоматично використовує змінну PORT
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🌐 Server is running on port ${PORT}`);
+});
 
 // ==== Збереження відомих монет у файл ====
 const KNOWN_COINS_FILE = './knownCoins.json';
@@ -37,7 +51,6 @@ bot.command('all_coins', async (ctx) => {
             return;
         }
 
-        // Batch-запити по 5 монет одночасно
         const batchSize = 5;
         let coinsWithDetails = [];
 
@@ -61,7 +74,6 @@ bot.command('all_coins', async (ctx) => {
             message += `\n🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>\n\n`;
         });
 
-        // Розбиваємо на шматки по 4000 символів
         const chunks = [];
         while (message.length > 0) {
             chunks.push(message.slice(0, 4000));
@@ -82,12 +94,11 @@ bot.command('all_coins', async (ctx) => {
 async function checkNewCoins() {
     try {
         const coins = await getNewCoins();
-        const newCoins = coins.filter(c => !knownCoins.has(c.link)); // унікальність по link
+        const newCoins = coins.filter(c => !knownCoins.has(c.link));
         if (!newCoins.length) return;
 
         console.log(`${newCoins.length} нових монет знайдено`);
 
-        // Batch-запити по 5 монет одночасно
         const batchSize = 5;
         let coinsWithDetails = [];
 
@@ -103,8 +114,8 @@ async function checkNewCoins() {
         }
 
         for (const coin of coinsWithDetails) {
-            knownCoins.add(coin.link); // зберігаємо link для унікальності
-            saveKnownCoins();          // зберігаємо у файл
+            knownCoins.add(coin.link);
+            saveKnownCoins();
 
             let message = `<b>${coin.name}</b>\nЦіна: ${coin.price}`;
             if (coin.details["Номінал"]) message += `\nНомінал: ${coin.details["Номінал"]}`;
@@ -122,7 +133,7 @@ async function checkNewCoins() {
 
 // ===== Запуск бота =====
 bot.launch();
-setInterval(checkNewCoins, 10 * 60 * 1000); // кожні 10 хв
-checkNewCoins(); // перевірка одразу при запуску
+setInterval(checkNewCoins, 10 * 60 * 1000);
+checkNewCoins();
 
 bot.on('text', (ctx) => ctx.reply('Бот отримав твоє повідомлення'));
