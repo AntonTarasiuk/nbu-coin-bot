@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 
-Отримуємо список монет з сайту
+// Отримуємо список монет з сайту
 export async function getNewCoins() {
     const url = 'https://coins.bank.gov.ua/catalog.html';
     const res = await fetch(url, {
