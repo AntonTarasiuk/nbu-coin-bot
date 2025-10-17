@@ -67,7 +67,9 @@ bot.command('all_coins', async (ctx) => {
 
         let message = '';
         coinsWithDetails.forEach((coin) => {
-            message += `<b>${coin.name}</b>\nЦіна: ${coin.price}`;
+            message += `<b>${coin.name}</b>\n`;
+            message += `Ціна: ${coin.price}\n`;
+            message += `Статус: ${coin.status}`; // новий рядок із статусом
             if (coin.details["Номінал"]) message += `\nНомінал: ${coin.details["Номінал"]}`;
             if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
             if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
@@ -108,11 +110,13 @@ async function checkNewCoins() {
             knownCoins.add(coin.link);
             saveKnownCoins();
 
-            let message = `<b>${coin.name}</b>\nЦіна: ${coin.price}`;
-            if (coin.details["Номінал"]) message += `\nНомінал: ${coin.details["Номінал"]}`;
-            if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
-            if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
-            message += `\n🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+            let message = `<b>${coin.name}</b>\n`;
+            message += `Ціна: ${coin.price}\n`;
+            message += `Статус: ${coin.status}\n`; // статус наявності
+            if (coin.details["Номінал"]) message += `Номінал: ${coin.details["Номінал"]}\n`;
+            if (coin.details["Матеріал"]) message += `Матеріал: ${coin.details["Матеріал"]}\n`;
+            if (coin.details["Тираж"]) message += `Тираж: ${coin.details["Тираж"]}\n`;
+            message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
 
             await sendTelegramMessage(message);
         }

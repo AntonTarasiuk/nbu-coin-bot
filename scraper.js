@@ -39,8 +39,17 @@ export async function getNewCoins() {
         const link = nameEl.attr('href');
         const price = container.find('span.new_price').text().trim();
 
+        // Визначаємо статус наявності
+        const basketEl = container.find('span.main-basked-icon');
+        let status = 'Невідомо';
+        if (basketEl.hasClass('add2cart')) {
+            status = 'В наявності';
+        } else if (basketEl.hasClass('gray') && (basketEl.attr('title') || '').includes('Вибачте товару немає')) {
+            status = 'Відсутній';
+        }
+
         if (name && link && price) {
-            coins.push({ name, price, link });
+            coins.push({ name, price, link, status });
         }
     });
 
