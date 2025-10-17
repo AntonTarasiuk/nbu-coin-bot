@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 
 // Отримуємо список монет з сайту
 export async function getNewCoins() {
-    const url = 'https://coins.bank.gov.ua/catalog.html';
+    const url = `https://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=https://coins.bank.gov.ua/catalog.html`;
     const res = await fetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -73,7 +73,7 @@ export async function getNewCoins() {
 
 // Отримуємо деталі однієї монети
 export async function getCoinDetails(coinLink) {
-    const url = `https://coins.bank.gov.ua${coinLink}`;
+    const url = `https://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=https://coins.bank.gov.ua${coinLink}`;
     const res = await fetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
