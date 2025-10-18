@@ -3,11 +3,26 @@ import * as cheerio from 'cheerio';
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 
-// Отримуємо список монет з сайту через ScraperAPI
+// === Safe fetch with retry ===
+async function safeFetch(url, options, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(url, options);
+            if (res.ok) return res;
+            console.warn(`⚠️ Fetch failed (attempt ${i + 1}): ${res.status}`);
+        } catch (e) {
+            console.warn(`⚠️ Network error (attempt ${i + 1}):`, e.message);
+        }
+        await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
+    }
+    throw new Error('❌ All fetch attempts failed');
+}
+
+// === Get list of coins ===
 export async function getNewCoins() {
     const url = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=https://coins.bank.gov.ua/catalog.html`;
 
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
@@ -15,17 +30,11 @@ export async function getNewCoins() {
     });
 
     console.log('🔍 Response status:', res.status);
-
     const html = await res.text();
-
-    if (!res.ok) {
-        console.error('❌ HTTP error:', res.status);
-        return [];
-    }
 
     if (!html.includes('product__name')) {
         console.error('⚠️ HTML не містить product__name! Можливо, блокування сайтом.');
-        console.log(html.slice(0, 500)); // короткий фрагмент HTML
+        console.log(html.slice(0, 500));
         return [];
     }
 
@@ -39,7 +48,7 @@ export async function getNewCoins() {
         const link = nameEl.attr('href');
         const price = container.find('span.new_price').text().trim();
 
-        // Визначаємо статус наявності
+        // Status
         const basketEl = container.find('span.main-basked-icon');
         let status = 'Невідомо';
         if (basketEl.hasClass('add2cart')) {
@@ -57,18 +66,16 @@ export async function getNewCoins() {
     return coins;
 }
 
-// Отримуємо деталі однієї монети
+// === Get details for one coin ===
 export async function getCoinDetails(coinLink) {
     const url = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=https://coins.bank.gov.ua${coinLink}`;
 
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
         }
     });
-
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
     const html = await res.text();
     const $ = cheerio.load(html);
