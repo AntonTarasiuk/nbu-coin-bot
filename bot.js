@@ -24,16 +24,20 @@ setInterval(() => {
 
 // ===== Known coins file =====
 const KNOWN_COINS_FILE = './knownCoins.json';
-let knownCoins = new Set();
+let knownCoins = {};
 
 if (fs.existsSync(KNOWN_COINS_FILE)) {
-    knownCoins = new Set(JSON.parse(fs.readFileSync(KNOWN_COINS_FILE, 'utf-8')));
+    try {
+        knownCoins = JSON.parse(fs.readFileSync(KNOWN_COINS_FILE, 'utf-8'));
+    } catch {
+        knownCoins = {};
+    }
 } else {
-    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify([], null, 2));
+    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify({}, null, 2));
 }
 
 function saveKnownCoins() {
-    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify([...knownCoins], null, 2));
+    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify(knownCoins, null, 2));
 }
 
 // ===== Safe Telegram send =====
@@ -91,38 +95,73 @@ bot.command('all_coins', async (ctx) => {
     }
 });
 
-// ===== Check new coins =====
+// ===== Check new coins & status updates =====
 async function checkNewCoins() {
     console.log(`⏰ Check started at ${new Date().toLocaleString('uk-UA')}`);
     try {
         const coins = await getNewCoins();
-        const newCoins = coins.filter(c => !knownCoins.has(c.link));
-        if (!newCoins.length) return;
 
-        let coinsWithDetails = [];
-        for (let i = 0; i < newCoins.length; i += 5) {
-            const batch = newCoins.slice(i, i + 5);
-            const batchDetails = await Promise.all(
-                batch.map(async coin => ({
-                    ...coin,
-                    details: await getCoinDetails(coin.link)
-                }))
-            );
-            coinsWithDetails = coinsWithDetails.concat(batchDetails);
+        const newCoins = [];
+        const statusChanges = [];
+
+        for (const coin of coins) {
+            const prev = knownCoins[coin.link];
+
+            if (!prev) {
+                // нова монета
+                newCoins.push(coin);
+                knownCoins[coin.link] = { status: coin.status };
+            } else if (prev.status !== coin.status) {
+                // змінився статус
+                statusChanges.push({ ...coin, oldStatus: prev.status });
+                knownCoins[coin.link] = { status: coin.status };
+            }
         }
 
-        for (const coin of coinsWithDetails) {
-            knownCoins.add(coin.link);
-            saveKnownCoins();
+        if (newCoins.length === 0 && statusChanges.length === 0) {
+            console.log('🔹 Немає нових монет або змін статусу');
+            return;
+        }
 
-            let message = `<b>${coin.name}</b>\n`;
-            message += `Ціна: ${coin.price}\n`;
-            message += `Статус: ${coin.status}\n`;
-            if (coin.details["Матеріал"]) message += `Матеріал: ${coin.details["Матеріал"]}\n`;
-            if (coin.details["Тираж"]) message += `Тираж: ${coin.details["Тираж"]}\n`;
-            message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+        saveKnownCoins();
 
-            await sendTelegramMessage(message);
+        // ===== Надсилаємо нові монети =====
+        if (newCoins.length > 0) {
+            console.log(`🪙 Нових монет: ${newCoins.length}`);
+            let coinsWithDetails = [];
+            for (let i = 0; i < newCoins.length; i += 5) {
+                const batch = newCoins.slice(i, i + 5);
+                const batchDetails = await Promise.all(
+                    batch.map(async coin => ({
+                        ...coin,
+                        details: await getCoinDetails(coin.link)
+                    }))
+                );
+                coinsWithDetails = coinsWithDetails.concat(batchDetails);
+            }
+
+            for (const coin of coinsWithDetails) {
+                let message = `<b>🆕 Нова монета!</b>\n<b>${coin.name}</b>\n`;
+                message += `Ціна: ${coin.price}\n`;
+                message += `Статус: ${coin.status}\n`;
+                if (coin.details["Матеріал"]) message += `Матеріал: ${coin.details["Матеріал"]}\n`;
+                if (coin.details["Тираж"]) message += `Тираж: ${coin.details["Тираж"]}\n`;
+                message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+                await sendTelegramMessage(message);
+            }
+        }
+
+        // ===== Надсилаємо зміни статусу =====
+        if (statusChanges.length > 0) {
+            console.log(`🔄 Змін статусу: ${statusChanges.length}`);
+            for (const coin of statusChanges) {
+                let message = `<b>🔔 Зміна статусу!</b>\n<b>${coin.name}</b>\n`;
+                message += `Було: ${coin.oldStatus}\n`;
+                message += `Стало: ${coin.status}\n`;
+                message += `Ціна: ${coin.price}\n`;
+                message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+                await sendTelegramMessage(message);
+            }
         }
 
     } catch (err) {
