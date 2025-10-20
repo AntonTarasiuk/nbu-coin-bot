@@ -1,7 +1,10 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
+import { config } from 'dotenv';
+config();
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
+console.log('ScraperAPI key:', SCRAPER_API_KEY);
 
 // === Safe fetch with retry ===
 async function safeFetch(url, options, retries = 3) {

@@ -1,42 +1,35 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { config } from 'dotenv';
 import { getNewCoins, getCoinDetails } from './scraper.js';
 import fs from 'fs';
 import express from 'express';
-import fetch from 'node-fetch';
 
 config();
+console.log('DOTENV loaded, SCRAPER_API_KEY:', process.env.SCRAPER_API_KEY);
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const CHAT_ID = process.env.CHAT_ID;
 
-// ===== Express server for Render / UptimeRobot =====
+// ===== Express сервер для Render / UptimeRobot =====
 const app = express();
 app.get('/', (req, res) => res.send('✅ Bot is running!'));
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 
-// Keep Render awake
-setInterval(() => {
-    fetch(`https://nbu-coin-bot.onrender.com/ping`).catch(() => {});
-}, 5 * 60 * 1000);
-
-// ===== Known coins file =====
+// ===== Файл відомих монет =====
 const KNOWN_COINS_FILE = './knownCoins.json';
 let knownCoins = new Set();
-
 if (fs.existsSync(KNOWN_COINS_FILE)) {
     knownCoins = new Set(JSON.parse(fs.readFileSync(KNOWN_COINS_FILE, 'utf-8')));
 } else {
     fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify([], null, 2));
 }
-
 function saveKnownCoins() {
     fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify([...knownCoins], null, 2));
 }
 
-// ===== Safe Telegram send =====
+// ===== Відправка повідомлення з retry =====
 async function sendTelegramMessage(message) {
     try {
         await bot.telegram.sendMessage(CHAT_ID, message, {
@@ -44,17 +37,53 @@ async function sendTelegramMessage(message) {
             disable_web_page_preview: true
         });
     } catch (err) {
-        console.error('Telegram send error, retrying in 5s', err);
+        console.error('Помилка відправки Telegram, пробуємо через 5 сек', err);
         setTimeout(() => sendTelegramMessage(message), 5000);
     }
 }
 
-// ===== Bot commands =====
-bot.start((ctx) => ctx.reply('✅ Бот працює!'));
+// ===== Inline-карусель =====
+async function sendCoinsCarousel(ctx, coins) {
+    for (let i = 0; i < coins.length; i += 5) {
+        const batch = coins.slice(i, i + 5);
+        let message = '';
+        const buttons = [];
 
-bot.command('all_coins', async (ctx) => {
+        for (const coin of batch) {
+            message += `<b>${coin.name}</b>\nЦіна: ${coin.price}\nСтатус: ${coin.status}`;
+            if (coin.details["Номінал"]) message += `\nНомінал: ${coin.details["Номінал"]}`;
+            if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
+            if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
+            message += '\n\n';
+
+            // Кожна кнопка на окремому рядку
+            buttons.push([Markup.button.url('Перейти', `https://coins.bank.gov.ua${coin.link}`)]);
+        }
+
+        await ctx.reply(message.slice(0, 4000), {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            reply_markup: Markup.inlineKeyboard(buttons)
+        });
+    }
+}
+
+// ===== Головне меню =====
+function mainMenu() {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback('💰 Усі монети', 'all_coins')],
+        [Markup.button.callback('🔄 Перевірити нові', 'check_new')],
+        [Markup.button.url('🌐 Сайт НБУ', 'https://coins.bank.gov.ua')]
+    ]);
+}
+
+// ===== Старт =====
+bot.start((ctx) => ctx.reply('✅ Бот працює! Оберіть дію:', mainMenu()));
+
+// ===== Callback-кнопки =====
+bot.action('all_coins', async (ctx) => {
+    await ctx.answerCbQuery();
     try {
-        await ctx.reply('⏳ Отримую всі монети з сайту...');
         const coins = await getNewCoins();
         if (coins.length === 0) return ctx.reply('На сайті монет поки немає 😕');
 
@@ -62,28 +91,12 @@ bot.command('all_coins', async (ctx) => {
         for (let i = 0; i < coins.length; i += 5) {
             const batch = coins.slice(i, i + 5);
             const batchDetails = await Promise.all(
-                batch.map(async coin => ({
-                    ...coin,
-                    details: await getCoinDetails(coin.link)
-                }))
+                batch.map(async coin => ({ ...coin, details: await getCoinDetails(coin.link) }))
             );
             coinsWithDetails = coinsWithDetails.concat(batchDetails);
         }
 
-        let message = '';
-        coinsWithDetails.forEach((coin) => {
-            message += `<b>${coin.name}</b>\n`;
-            message += `Ціна: ${coin.price}\n`;
-            message += `Статус: ${coin.status}`;
-            if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
-            if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
-            message += `\n🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>\n\n`;
-        });
-
-        while (message.length > 0) {
-            await ctx.reply(message.slice(0, 4000), { parse_mode: 'HTML', disable_web_page_preview: true });
-            message = message.slice(4000);
-        }
+        await sendCoinsCarousel(ctx, coinsWithDetails);
 
     } catch (err) {
         console.error(err);
@@ -91,9 +104,37 @@ bot.command('all_coins', async (ctx) => {
     }
 });
 
-// ===== Check new coins =====
+bot.action('check_new', async (ctx) => {
+    await ctx.answerCbQuery();
+    try {
+        const coins = await getNewCoins();
+        const newCoins = coins.filter(c => !knownCoins.has(c.link));
+        if (!newCoins.length) return ctx.reply('Немає нових монет 😕');
+
+        let coinsWithDetails = [];
+        for (let i = 0; i < newCoins.length; i += 5) {
+            const batch = newCoins.slice(i, i + 5);
+            const batchDetails = await Promise.all(
+                batch.map(async coin => ({ ...coin, details: await getCoinDetails(coin.link) }))
+            );
+            coinsWithDetails = coinsWithDetails.concat(batchDetails);
+        }
+
+        for (const coin of coinsWithDetails) {
+            knownCoins.add(coin.link);
+            saveKnownCoins();
+        }
+
+        await sendCoinsCarousel(ctx, coinsWithDetails);
+
+    } catch (err) {
+        console.error(err);
+        ctx.reply('❌ Помилка при перевірці нових монет');
+    }
+});
+
+// ===== Автоперевірка =====
 async function checkNewCoins() {
-    console.log(`⏰ Check started at ${new Date().toLocaleString('uk-UA')}`);
     try {
         const coins = await getNewCoins();
         const newCoins = coins.filter(c => !knownCoins.has(c.link));
@@ -103,10 +144,7 @@ async function checkNewCoins() {
         for (let i = 0; i < newCoins.length; i += 5) {
             const batch = newCoins.slice(i, i + 5);
             const batchDetails = await Promise.all(
-                batch.map(async coin => ({
-                    ...coin,
-                    details: await getCoinDetails(coin.link)
-                }))
+                batch.map(async coin => ({ ...coin, details: await getCoinDetails(coin.link) }))
             );
             coinsWithDetails = coinsWithDetails.concat(batchDetails);
         }
@@ -115,12 +153,11 @@ async function checkNewCoins() {
             knownCoins.add(coin.link);
             saveKnownCoins();
 
-            let message = `<b>${coin.name}</b>\n`;
-            message += `Ціна: ${coin.price}\n`;
-            message += `Статус: ${coin.status}\n`;
-            if (coin.details["Матеріал"]) message += `Матеріал: ${coin.details["Матеріал"]}\n`;
-            if (coin.details["Тираж"]) message += `Тираж: ${coin.details["Тираж"]}\n`;
-            message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+            let message = `<b>${coin.name}</b>\nЦіна: ${coin.price}\nСтатус: ${coin.status}`;
+            if (coin.details["Номінал"]) message += `\nНомінал: ${coin.details["Номінал"]}`;
+            if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
+            if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
+            message += `\n🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
 
             await sendTelegramMessage(message);
         }
@@ -130,22 +167,15 @@ async function checkNewCoins() {
     }
 }
 
+// ===== Тестова команда =====
 bot.command('test_check', async (ctx) => {
     await checkNewCoins();
     ctx.reply('✅ Перевірка нових монет завершена');
 });
 
+// ===== Запуск =====
 bot.launch({ dropPendingUpdates: true });
 setInterval(checkNewCoins, 10 * 60 * 1000);
 checkNewCoins();
 
-bot.on('text', (ctx) => ctx.reply('Бот отримав твоє повідомлення'));
-
-// ===== Global error handlers =====
-process.on('unhandledRejection', (err) => {
-    console.error('⚠️ Unhandled promise rejection:', err);
-});
-
-process.on('uncaughtException', (err) => {
-    console.error('💥 Uncaught exception:', err);
-});
+bot.on('text', (ctx) => ctx.reply('Бот отримав твоє повідомлення', mainMenu()));
