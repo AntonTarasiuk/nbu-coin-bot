@@ -20,7 +20,7 @@ app.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 // Keep Render awake
 setInterval(() => {
     fetch(`https://nbu-coin-bot.onrender.com/ping`).catch(() => {});
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000); // раз на 5 хв
 
 // ===== Known coins file =====
 const KNOWN_COINS_FILE = './knownCoins.json';
@@ -108,11 +108,9 @@ async function checkNewCoins() {
             const prev = knownCoins[coin.link];
 
             if (!prev) {
-                // нова монета
                 newCoins.push(coin);
                 knownCoins[coin.link] = { status: coin.status };
             } else if (prev.status !== coin.status) {
-                // змінився статус
                 statusChanges.push({ ...coin, oldStatus: prev.status });
                 knownCoins[coin.link] = { status: coin.status };
             }
@@ -125,7 +123,6 @@ async function checkNewCoins() {
 
         saveKnownCoins();
 
-        // ===== Надсилаємо нові монети =====
         if (newCoins.length > 0) {
             console.log(`🪙 Нових монет: ${newCoins.length}`);
             let coinsWithDetails = [];
@@ -151,7 +148,6 @@ async function checkNewCoins() {
             }
         }
 
-        // ===== Надсилаємо зміни статусу =====
         if (statusChanges.length > 0) {
             console.log(`🔄 Змін статусу: ${statusChanges.length}`);
             for (const coin of statusChanges) {
@@ -175,8 +171,29 @@ bot.command('test_check', async (ctx) => {
 });
 
 bot.launch({ dropPendingUpdates: true });
-setInterval(checkNewCoins, 10 * 60 * 1000);
-checkNewCoins();
+
+// ===== Автоматичне скрапання з розкладом =====
+function shouldScrapeNow() {
+    const now = new Date();
+    const hour = now.getHours();
+    const day = now.getDay(); // неділя = 0, понеділок = 1, ..., субота = 6
+    return day >= 1 && day <= 6 && hour >= 8 && hour < 23; // пн–сб, 08:00–22:59
+}
+
+async function scheduledScrape() {
+    if (shouldScrapeNow()) {
+        console.log('🕓 Запускаю планову перевірку монет...');
+        await checkNewCoins();
+    } else {
+        console.log('🌙 Ніч або неділя — скрапінг пропущено.');
+    }
+}
+
+// Запуск кожні 30 хвилин
+setInterval(scheduledScrape, 30 * 60 * 1000);
+
+// Одразу перша перевірка при запуску
+scheduledScrape();
 
 bot.on('text', (ctx) => ctx.reply('Бот отримав твоє повідомлення'));
 
