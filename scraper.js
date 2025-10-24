@@ -3,6 +3,9 @@ import * as cheerio from 'cheerio';
 
 const ZEN_API_KEY = process.env.ZEN_API_KEY; // додай у Render → Environment Variables
 
+console.log('ZEN_API_KEY:', process.env.ZEN_API_KEY);
+
+
 const TARGET_URL = 'https://coins.bank.gov.ua/catalog.html';
 
 // ===== Safe fetch with retry =====
