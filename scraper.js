@@ -1,10 +1,7 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 
-const ZEN_API_KEY = process.env.ZEN_API_KEY;
-
-// === Safe fetch with retry ===
-async function safeFetch(url, options = {}, retries = 3) {
+async function safeFetch(url, options, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
             const res = await fetch(url, options);
@@ -18,17 +15,17 @@ async function safeFetch(url, options = {}, retries = 3) {
     throw new Error('❌ All fetch attempts failed');
 }
 
-// === Get list of coins ===
 export async function getNewCoins() {
-    const url = `https://app.zenscrape.com/api/v1/get?apikey=${ZEN_API_KEY}&url=https://coins.bank.gov.ua/catalog.html`;
+    const url = `https://api.zenscrape.com/v1/get?apikey=${process.env.ZEN_API_KEY}&url=https://coins.bank.gov.ua/catalog.html`;
 
     const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8'
+            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
         }
     });
 
+    console.log('🔍 Response status:', res.status);
     const html = await res.text();
 
     if (!html.includes('product__name')) {
@@ -47,32 +44,24 @@ export async function getNewCoins() {
         const link = nameEl.attr('href');
         const price = container.find('span.new_price').text().trim();
 
-        // Status
         const basketEl = container.find('span.main-basked-icon');
         let status = 'Невідомо';
-        if (basketEl.hasClass('add2cart')) {
-            status = 'В наявності';
-        } else if (basketEl.hasClass('gray') && (basketEl.attr('title') || '').includes('Вибачте товару немає')) {
-            status = 'Відсутній';
-        }
+        if (basketEl.hasClass('add2cart')) status = 'В наявності';
+        else if (basketEl.hasClass('gray') && (basketEl.attr('title') || '').includes('Вибачте товару немає')) status = 'Відсутній';
 
-        if (name && link && price) {
-            coins.push({ name, price, link, status });
-        }
+        if (name && link && price) coins.push({ name, price, link, status });
     });
 
     console.log(`✅ Знайдено ${coins.length} монет`);
     return coins;
 }
 
-// === Get details for one coin ===
 export async function getCoinDetails(coinLink) {
-    const url = `https://app.zenscrape.com/api/v1/get?apikey=${ZEN_API_KEY}&url=https://coins.bank.gov.ua${coinLink}`;
-
+    const url = `https://api.zenscrape.com/v1/get?apikey=${process.env.ZEN_API_KEY}&url=https://coins.bank.gov.ua${coinLink}`;
     const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8'
+            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
         }
     });
 
