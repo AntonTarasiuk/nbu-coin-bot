@@ -1,47 +1,38 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 
-const ZEN_API_KEY = process.env.ZEN_API_KEY;
-const targetURL = 'https://coins.bank.gov.ua/catalog.html';
-
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 // === Safe fetch with retry ===
-async function safeFetchTarget(url, options = {}, retries = 3) {
+async function safeFetch(url, options, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
-            console.log(`🔁 Zenscrape request attempt ${i + 1} -> ${targetURL}`);
             const res = await fetch(url, options);
-            console.log('🌐 Zenscrape response status:', res.status);
-
             if (res.ok) return res;
-            console.warn(`⚠️ Zenscrape returned status ${res.status} (attempt ${i + 1})`);
+            console.warn(`⚠️ Fetch failed (attempt ${i + 1}): ${res.status}`);
         } catch (e) {
             console.warn(`⚠️ Network error (attempt ${i + 1}):`, e.message);
         }
-        await new Promise(r => setTimeout(r, 2000)); // 2s wait
+        await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
     }
     throw new Error('❌ All fetch attempts failed');
 }
 
 // === Get list of coins ===
 export async function getNewCoins() {
-    if (!ZEN_API_KEY) throw new Error('ZEN_API_KEY is not defined in environment');
-
-    // ZenScrape URL with allow_insecure_ssl
-    const url = `https://api.zenscrape.com/v1/get?apikey=${ZEN_API_KEY}&url=${encodeURIComponent(targetURL)}&allow_insecure_ssl=1`;
-
-    const res = await safeFetchTarget(url, {
+    const url = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=https://coins.bank.gov.ua/catalog.html`;
+ const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
         }
     });
 
+    console.log('🔍 Response status:', res.status);
     const html = await res.text();
 
     if (!html.includes('product__name')) {
         console.error('⚠️ HTML не містить product__name! Можливо, блокування сайтом.');
-        console.log(html.slice(0, 500));
-        return [];
+                return [];
     }
 
     const $ = cheerio.load(html);
@@ -54,7 +45,7 @@ export async function getNewCoins() {
         const link = nameEl.attr('href');
         const price = container.find('span.new_price').text().trim();
 
-        // Status
+                // Status
         const basketEl = container.find('span.main-basked-icon');
         let status = 'Невідомо';
         if (basketEl.hasClass('add2cart')) {
@@ -71,20 +62,14 @@ export async function getNewCoins() {
     console.log(`✅ Знайдено ${coins.length} монет`);
     return coins;
 }
-
-// === Get details for one coin ===
 export async function getCoinDetails(coinLink) {
-    if (!ZEN_API_KEY) throw new Error('ZEN_API_KEY is not defined in environment');
-
-    const url = `https://api.zenscrape.com/v1/get?apikey=${ZEN_API_KEY}&url=${encodeURIComponent(`https://coins.bank.gov.ua${coinLink}`)}&allow_insecure_ssl=1`;
-
-    const res = await safeFetchTarget(url, {
+    const url = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=https://coins.bank.gov.ua${coinLink}`;
+    const res = await safeFetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
         }
     });
-
     const html = await res.text();
     const $ = cheerio.load(html);
 
