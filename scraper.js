@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 
-const ZEN_API_KEY = process.env.ZENSCRAPE_API_KEY; // додай у Render → Environment Variables
+const ZEN_API_KEY = process.env.ZEN_API_KEY; // додай у Render → Environment Variables
 
 const TARGET_URL = 'https://coins.bank.gov.ua/catalog.html';
 
