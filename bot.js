@@ -1,137 +1,199 @@
-import { Telegraf } from "telegraf";
-import { config } from "dotenv";
-import { getNewCoins } from "./scraper.js";
-import fs from "fs";
-import express from "express";
-import fetch from "node-fetch";
+import { Telegraf } from 'telegraf';
+import { config } from 'dotenv';
+import { getNewCoins, getCoinDetails } from './scraper.js';
+import fs from 'fs';
+import express from 'express';
+import fetch from 'node-fetch';
 
 config();
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const CHAT_ID = process.env.CHAT_ID;
 
-// ===== Express сервер для Render / UptimeRobot =====
+// ===== Express server for Render / UptimeRobot =====
 const app = express();
-app.get("/", (req, res) => res.send("✅ Bot is running!"));
-app.get("/ping", (req, res) => res.status(200).send("OK"));
+app.get('/', (req, res) => res.send('✅ Bot is running!'));
+app.get('/ping', (req, res) => res.status(200).send('OK'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 
-// ===== Keep Render awake (раз на 5 хв) =====
+// Keep Render awake
 setInterval(() => {
-  fetch("https://nbu-coin-bot.onrender.com/ping").catch(() => {});
+    fetch(`https://nbu-coin-bot.onrender.com/ping`).catch(() => {});
 }, 5 * 60 * 1000);
 
-// ===== Known coins (локальна база) =====
-const KNOWN_COINS_FILE = "./knownCoins.json";
+// ===== Known coins file =====
+const KNOWN_COINS_FILE = './knownCoins.json';
 let knownCoins = {};
 
 if (fs.existsSync(KNOWN_COINS_FILE)) {
-  try {
-    knownCoins = JSON.parse(fs.readFileSync(KNOWN_COINS_FILE, "utf-8"));
-  } catch {
-    knownCoins = {};
-  }
+    try {
+        knownCoins = JSON.parse(fs.readFileSync(KNOWN_COINS_FILE, 'utf-8'));
+    } catch {
+        knownCoins = {};
+    }
 } else {
-  fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify({}, null, 2));
+    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify({}, null, 2));
 }
 
 function saveKnownCoins() {
-  fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify(knownCoins, null, 2));
+    fs.writeFileSync(KNOWN_COINS_FILE, JSON.stringify(knownCoins, null, 2));
 }
 
-// ===== Безпечне надсилання повідомлень у Telegram =====
+// ===== Safe Telegram send =====
 async function sendTelegramMessage(message) {
-  try {
-    await bot.telegram.sendMessage(CHAT_ID, message, {
-      parse_mode: "HTML",
-      disable_web_page_preview: false,
-    });
-  } catch (err) {
-    console.error("Telegram send error:", err.message);
-    setTimeout(() => sendTelegramMessage(message), 5000);
-  }
+    try {
+        await bot.telegram.sendMessage(CHAT_ID, message, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+        });
+    } catch (err) {
+        console.error('Telegram send error, retrying in 5s', err);
+        setTimeout(() => sendTelegramMessage(message), 5000);
+    }
 }
 
-// ===== Команди бота =====
-bot.start((ctx) => ctx.reply("✅ Бот працює!"));
+// ===== Bot commands =====
+bot.start((ctx) => ctx.reply('✅ Бот працює!'));
 
-bot.command("all_coins", async (ctx) => {
-  try {
-    await ctx.reply("⏳ Отримую всі монети з сайту...");
-    const coins = await getNewCoins();
+bot.command('all_coins', async (ctx) => {
+    try {
+        await ctx.reply('⏳ Отримую всі монети з сайту...');
+        const coins = await getNewCoins();
+        if (coins.length === 0) return ctx.reply('На сайті монет поки немає 😕');
 
-    if (coins.length === 0) return ctx.reply("На сайті монет поки немає 😕");
+        let coinsWithDetails = [];
+        for (let i = 0; i < coins.length; i += 5) {
+            const batch = coins.slice(i, i + 5);
+            const batchDetails = await Promise.all(
+                batch.map(async coin => ({
+                    ...coin,
+                    details: await getCoinDetails(coin.link)
+                }))
+            );
+            coinsWithDetails = coinsWithDetails.concat(batchDetails);
+        }
 
-    let message = coins.map(c => `• <a href="${c.link}">${c.title}</a>`).join("\n");
-    await ctx.reply(message, { parse_mode: "HTML" });
+        let message = '';
+        coinsWithDetails.forEach((coin) => {
+            message += `<b>${coin.name}</b>\n`;
+            message += `Ціна: ${coin.price}\n`;
+            message += `Статус: ${coin.status}`;
+            if (coin.details["Матеріал"]) message += `\nМатеріал: ${coin.details["Матеріал"]}`;
+            if (coin.details["Тираж"]) message += `\nТираж: ${coin.details["Тираж"]}`;
+            message += `\n🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>\n\n`;
+        });
 
-  } catch (err) {
-    console.error("❌ Помилка при отриманні монет:", err);
-    ctx.reply("❌ Помилка при отриманні списку монет");
-  }
+        while (message.length > 0) {
+            await ctx.reply(message.slice(0, 4000), { parse_mode: 'HTML', disable_web_page_preview: true });
+            message = message.slice(4000);
+        }
+
+    } catch (err) {
+        console.error(err);
+        ctx.reply('❌ Помилка при отриманні списку монет');
+    }
 });
 
-// ===== Перевірка нових монет =====
+// ===== Check new coins & status updates =====
 async function checkNewCoins() {
-  const now = new Date();
-  const hour = now.getHours();
-  const day = now.getDay(); // 0 - неділя, 1 - понеділок, ..., 6 - субота
+    const now = new Date();
+    const hours = now.getHours();
+    const day = now.getDay(); // 0 = неділя, 6 = субота
 
-  // Працюємо лише Пн–Сб (1–6) і з 8:00 до 23:00
-  if (day === 0 || hour < 8 || hour >= 23) {
-    console.log(`⏸ Пропуск перевірки (${now.toLocaleString("uk-UA")})`);
-    return;
-  }
-
-  console.log(`⏰ Check started at ${now.toLocaleString("uk-UA")}`);
-
-  try {
-    const coins = await getNewCoins();
-    const newCoins = [];
-
-    for (const coin of coins) {
-      if (!knownCoins[coin.link]) {
-        newCoins.push(coin);
-        knownCoins[coin.link] = true;
-      }
+    // Скрейпимо лише Пн–Сб та 08:00–23:00
+    if (day === 0 || hours < 8 || hours >= 23) {
+        console.log('⏸ Outside scraping hours. Skipping...');
+        return;
     }
 
-    if (newCoins.length === 0) {
-      console.log("🔹 Нових монет немає");
-      return;
+    console.log(`⏰ Check started at ${now.toLocaleString('uk-UA')}`);
+    try {
+        const coins = await getNewCoins();
+
+        const newCoins = [];
+        const statusChanges = [];
+
+        for (const coin of coins) {
+            const prev = knownCoins[coin.link];
+
+            if (!prev) {
+                newCoins.push(coin);
+                knownCoins[coin.link] = { status: coin.status };
+            } else if (prev.status !== coin.status) {
+                statusChanges.push({ ...coin, oldStatus: prev.status });
+                knownCoins[coin.link] = { status: coin.status };
+            }
+        }
+
+        if (newCoins.length === 0 && statusChanges.length === 0) {
+            console.log('🔹 Немає нових монет або змін статусу');
+            return;
+        }
+
+        saveKnownCoins();
+
+        // ===== Нові монети =====
+        if (newCoins.length > 0) {
+            console.log(`🪙 Нових монет: ${newCoins.length}`);
+            let coinsWithDetails = [];
+            for (let i = 0; i < newCoins.length; i += 5) {
+                const batch = newCoins.slice(i, i + 5);
+                const batchDetails = await Promise.all(
+                    batch.map(async coin => ({
+                        ...coin,
+                        details: await getCoinDetails(coin.link)
+                    }))
+                );
+                coinsWithDetails = coinsWithDetails.concat(batchDetails);
+            }
+
+            for (const coin of coinsWithDetails) {
+                let message = `<b>🆕 Нова монета!</b>\n<b>${coin.name}</b>\n`;
+                message += `Ціна: ${coin.price}\n`;
+                message += `Статус: ${coin.status}\n`;
+                if (coin.details["Матеріал"]) message += `Матеріал: ${coin.details["Матеріал"]}\n`;
+                if (coin.details["Тираж"]) message += `Тираж: ${coin.details["Тираж"]}\n`;
+                message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+                await sendTelegramMessage(message);
+            }
+        }
+
+        // ===== Зміни статусу =====
+        if (statusChanges.length > 0) {
+            console.log(`🔄 Змін статусу: ${statusChanges.length}`);
+            for (const coin of statusChanges) {
+                let message = `<b>🔔 Зміна статусу!</b>\n<b>${coin.name}</b>\n`;
+                message += `Було: ${coin.oldStatus}\n`;
+                message += `Стало: ${coin.status}\n`;
+                message += `Ціна: ${coin.price}\n`;
+                message += `🔗 <a href="https://coins.bank.gov.ua${coin.link}">Деталі</a>`;
+                await sendTelegramMessage(message);
+            }
+        }
+
+    } catch (err) {
+        console.error("Помилка при перевірці монет:", err);
     }
-
-    saveKnownCoins();
-
-    for (const coin of newCoins) {
-      const message = `<b>🆕 Нова монета!</b>\n<a href="${coin.link}">${coin.title}</a>`;
-      await sendTelegramMessage(message);
-    }
-
-  } catch (err) {
-    console.error("Помилка при перевірці монет:", err);
-  }
 }
 
-// ===== Розклад =====
+// ===== Scheduled scraping =====
 async function scheduledScrape() {
-  console.log("🕓 Запускаю планову перевірку монет...");
-  await checkNewCoins();
+    await checkNewCoins();
+    setTimeout(scheduledScrape, 30 * 60 * 1000); // 30 хв
 }
 
-// Перевірка кожні 30 хвилин
-setInterval(scheduledScrape, 30 * 60 * 1000);
 scheduledScrape();
 
-// ===== Запуск бота =====
-bot.launch({ dropPendingUpdates: true });
-console.log("🤖 Бот запущено!");
+bot.command('test_check', async (ctx) => {
+    await checkNewCoins();
+    ctx.reply('✅ Перевірка нових монет завершена');
+});
 
-// ===== Глобальні обробники помилок =====
-process.on("unhandledRejection", (err) => {
-  console.error("⚠️ Unhandled promise rejection:", err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("💥 Uncaught exception:", err);
-});
+bot.launch({ dropPendingUpdates: true });
+
+bot.on('text', (ctx) => ctx.reply('Бот отримав твоє повідомлення'));
+
+// ===== Global error handlers =====
+process.on('unhandledRejection', (err) => console.error('⚠️ Unhandled promise rejection:', err));
+process.on('uncaughtException', (err) => console.error('💥 Uncaught exception:', err));
