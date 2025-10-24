@@ -1,41 +1,42 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 
-const ZEN_API_KEY = process.env.ZEN_API_KEY; // додай у Render → Environment Variables
+const ZEN_API_KEY = process.env.ZEN_API_KEY;
+const targetURL = 'https://coins.bank.gov.ua/catalog.html';
 
-console.log('ZEN_API_KEY:', process.env.ZEN_API_KEY);
-
-
-const TARGET_URL = 'https://coins.bank.gov.ua/catalog.html';
-
-// ===== Safe fetch with retry =====
-async function safeFetchTarget(url, retries = 3) {
+// === Safe fetch with retry ===
+async function safeFetchTarget(url, options = {}, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
-            console.log(`🔁 Zenscrape request attempt ${i + 1} -> ${url}`);
-            const res = await fetch(`https://api.zenscrape.com/v1/get?apikey=${ZEN_API_KEY}&url=${encodeURIComponent(url)}`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
-                },
-            });
+            console.log(`🔁 Zenscrape request attempt ${i + 1} -> ${targetURL}`);
+            const res = await fetch(url, options);
+            console.log('🌐 Zenscrape response status:', res.status);
 
-            console.log(`🔍 Zenscrape response status: ${res.status}`);
-            const text = await res.text();
-
-            if (res.ok) return text;
+            if (res.ok) return res;
             console.warn(`⚠️ Zenscrape returned status ${res.status} (attempt ${i + 1})`);
-        } catch (err) {
-            console.warn(`⚠️ Network error (attempt ${i + 1}):`, err.message);
+        } catch (e) {
+            console.warn(`⚠️ Network error (attempt ${i + 1}):`, e.message);
         }
-        await new Promise(r => setTimeout(r, 2000)); // 2s retry wait
+        await new Promise(r => setTimeout(r, 2000)); // 2s wait
     }
     throw new Error('❌ All fetch attempts failed');
 }
 
-// ===== Get list of coins =====
+// === Get list of coins ===
 export async function getNewCoins() {
-    const html = await safeFetchTarget(TARGET_URL);
+    if (!ZEN_API_KEY) throw new Error('ZEN_API_KEY is not defined in environment');
+
+    // ZenScrape URL with allow_insecure_ssl
+    const url = `https://api.zenscrape.com/v1/get?apikey=${ZEN_API_KEY}&url=${encodeURIComponent(targetURL)}&allow_insecure_ssl=1`;
+
+    const res = await safeFetchTarget(url, {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
+        }
+    });
+
+    const html = await res.text();
 
     if (!html.includes('product__name')) {
         console.error('⚠️ HTML не містить product__name! Можливо, блокування сайтом.');
@@ -71,9 +72,20 @@ export async function getNewCoins() {
     return coins;
 }
 
-// ===== Get details for one coin =====
+// === Get details for one coin ===
 export async function getCoinDetails(coinLink) {
-    const html = await safeFetchTarget(`https://coins.bank.gov.ua${coinLink}`);
+    if (!ZEN_API_KEY) throw new Error('ZEN_API_KEY is not defined in environment');
+
+    const url = `https://api.zenscrape.com/v1/get?apikey=${ZEN_API_KEY}&url=${encodeURIComponent(`https://coins.bank.gov.ua${coinLink}`)}&allow_insecure_ssl=1`;
+
+    const res = await safeFetchTarget(url, {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
+        }
+    });
+
+    const html = await res.text();
     const $ = cheerio.load(html);
 
     const details = {};
